@@ -1,3 +1,4 @@
+# Git ignore
 .DS_Store
 node_modules
 build
@@ -7,7 +8,6 @@ package
 .env.*
 !.env.example
 vite.config.js.timestamp-*
-vite.config.ts.timestamp-*
 database.db3*
 cache
 /dev
@@ -16,3 +16,13 @@ out/
 app
 sessions
 *browserEngine/*
+
+# App runtime (created by scripts, not committed)
+.app/
+logs/*.log
+database/db.json
+database/*.tmp
+frontend/dist/
+dist/
+install.log
+start.log

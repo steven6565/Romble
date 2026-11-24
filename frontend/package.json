@@ -1,0 +1,21 @@
+{
+  "name": "ytdb-frontend",
+  "private": true,
+  "version": "4.0.0",
+  "type": "module",
+  "description": "Modern dashboard UI for the Termux YouTube & Rumble platform",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "socket.io-client": "^4.8.1"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-react": "^4.3.4",
+    "vite": "^5.4.11"
+  }
+}
