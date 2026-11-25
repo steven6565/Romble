@@ -1,6 +1,6 @@
 {
   "name": "youtube-rumble-termux",
-  "version": "4.0.0",
+  "version": "5.0.0",
   "description": "YouTube & Rumble platform dashboard for Android — runs natively in Termux",
   "private": true,
   "scripts": {

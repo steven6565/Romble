@@ -2,11 +2,11 @@ import { useEffect, useRef, useState } from 'react';
 import { io } from 'socket.io-client';
 
 /**
- * Real-time WebSocket hook. Receives live stats and activity events from the
- * backend and keeps the connection status visible in the UI.
+ * Real-time WebSocket hook. Receives live stats, playback state and activity.
  */
 export function useRealtime() {
   const [stats, setStats] = useState(null);
+  const [playback, setPlayback] = useState(null);
   const [activity, setActivity] = useState([]);
   const [connected, setConnected] = useState(false);
   const socketRef = useRef(null);
@@ -21,12 +21,16 @@ export function useRealtime() {
     });
     socketRef.current = socket;
 
-    socket.on('connect', () => setConnected(true));
+    socket.on('connect', () => {
+      setConnected(true);
+      socket.emit('request_stats');
+      socket.emit('request_activity', 50);
+      socket.emit('request_playback');
+    });
     socket.on('disconnect', () => setConnected(false));
 
-    socket.on('stats', (payload) => {
-      setStats(payload);
-    });
+    socket.on('stats', (payload) => setStats(payload));
+    socket.on('playback', (payload) => setPlayback(payload));
     socket.on('activity', (entry) => {
       setActivity((prev) => [entry, ...prev].slice(0, 150));
     });
@@ -34,14 +38,8 @@ export function useRealtime() {
       setActivity(Array.isArray(list) ? list : []);
     });
 
-    // Pull current data immediately after connecting.
-    socket.on('connect', () => {
-      socket.emit('request_stats');
-      socket.emit('request_activity', 50);
-    });
-
     return () => socket.disconnect();
   }, []);
 
-  return { stats, activity, connected };
+  return { stats, playback, activity, connected };
 }

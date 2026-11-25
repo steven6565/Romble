@@ -10,7 +10,7 @@ const { loadEnv } = require('./services/env');
 const log = require('./services/logService');
 const statsService = require('./services/statsService');
 const activityService = require('./services/activityService');
-const taskService = require('./services/taskService');
+const playbackService = require('./services/playbackService');
 const dashboardController = require('./controllers/dashboardController');
 const apiRoutes = require('./routes/api.routes');
 const requestLogger = require('./middleware/requestLogger');
@@ -54,6 +54,7 @@ app.use(errorHandler);
 
 // --- Real-time streaming --------------------------------------------------
 let statsTimer = null;
+let lastPlaybackPayload = '';
 
 async function broadcastStats() {
   try {
@@ -63,6 +64,18 @@ async function broadcastStats() {
   } catch (err) { log.debug('[ws] stats broadcast error: ' + err.message); }
 }
 
+// Playback state is broadcast only when it actually changes, to keep the
+// phone's radio quiet.
+playbackService.setBroadcaster((state) => {
+  const run = state.run;
+  const fingerprint = run
+    ? `${run.id}:${run.status}:${run.sessions.map((s) => `${s.id}${s.status}${s.elapsedSec}`).join('')}`
+    : 'idle';
+  if (fingerprint === lastPlaybackPayload) return;
+  lastPlaybackPayload = fingerprint;
+  io.emit('playback', state);
+});
+
 io.on('connection', (socket) => {
   log.info('[ws] client connected');
   socket.on('request_stats', () => {
@@ -71,7 +84,9 @@ io.on('connection', (socket) => {
   socket.on('request_activity', (limit) => {
     socket.emit('activity_update', activityService.listActivity(limit || 50));
   });
-  // Push new activity entries live.
+  socket.on('request_playback', () => {
+    socket.emit('playback', playbackService.getState());
+  });
   const unsubscribe = activityService.onNewActivity((entry) => {
     io.emit('activity', entry);
   });
@@ -80,34 +95,38 @@ io.on('connection', (socket) => {
     log.info('[ws] client disconnected');
   });
   socket.emit('stats', dashboardController.statsSync());
+  socket.emit('playback', playbackService.getState());
 });
 
 // --- Background stats timer ----------------------------------------------
 if (!statsTimer) {
   statsTimer = setInterval(broadcastStats, Math.max(1000, Number(process.env.STATS_REFRESH_SECONDS || 3) * 1000));
+  if (statsTimer.unref) statsTimer.unref();
 }
 
 // Periodically persist stats history.
-setInterval(async () => {
+const historyTimer = setInterval(async () => {
   try {
+    const db = require('./services/db');
     const stats = dashboardController.statsSync();
     const cpu = await statsService.cpu();
     db.update('statsHistory', (list) => (list || []).concat([{
       ts: new Date().toISOString(),
       uptimeSec: stats.uptimeSec,
       cpuUsage: cpu,
-      activeTasks: stats.activeTasks,
-      totalOrganicRequests: stats.totalOrganicRequests
-    }]).slice(-288)); // keep ~15 min of 15s samples
+      memoryPercent: stats.memory?.usedPercent ?? 0,
+      runningSessions: stats.playback?.runningSessions ?? 0,
+      completedSessions: stats.playback?.completedSessions ?? 0
+    }]).slice(-288));
   } catch { /* persistence must never crash the server */ }
 }, 15000);
+if (historyTimer.unref) historyTimer.unref();
 
 // --- Startup --------------------------------------------------------------
-taskService.runLoop();
+playbackService.ensureEngine();
 
 server.listen(PORT, HOST, () => {
-  log.info(`Youtube-Rumble-Termux dashboard listening on http://${HOST}:${PORT}`);
-  log.info(`Uptime tracking started — visit http://${HOST}:${PORT}`);
+  log.info(`Romble V5 dashboard listening on http://${HOST}:${PORT}`);
   console.log(`[OK] Dashboard: http://${HOST}:${PORT} (pid ${process.pid})`);
 });
 
@@ -115,7 +134,8 @@ server.listen(PORT, HOST, () => {
 async function shutdown(signal) {
   log.info(`Received ${signal} — shutting down gracefully`);
   if (statsTimer) clearInterval(statsTimer);
-  taskService.stopAll();
+  clearInterval(historyTimer);
+  playbackService.shutdown();
   io.close();
   await new Promise((resolve) => server.close(resolve));
   setTimeout(() => process.exit(0), 1000).unref();

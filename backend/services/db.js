@@ -11,10 +11,13 @@ const DB_FILE = path.join(DB_DIR, 'db.json');
 
 const DEFAULTS = {
   settings: {},
-  tasks: [],
   activity: [],
-  statsHistory: []
+  statsHistory: [],
+  playback: null,
+  analytics: {}
 };
+
+const ARRAY_KEYS = ['activity', 'statsHistory'];
 
 function load() {
   let data = null;
@@ -25,9 +28,8 @@ function load() {
     data = null;
   }
   const merged = Object.assign({}, DEFAULTS, data || {});
-  if (!Array.isArray(merged.tasks)) merged.tasks = [];
-  if (!Array.isArray(merged.activity)) merged.activity = [];
-  if (!Array.isArray(merged.statsHistory)) merged.statsHistory = [];
+  for (const key of ARRAY_KEYS) if (!Array.isArray(merged[key])) merged[key] = [];
+  if (merged.analytics === null || typeof merged.analytics !== 'object') merged.analytics = {};
   return merged;
 }
 

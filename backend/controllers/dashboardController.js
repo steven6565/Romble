@@ -2,26 +2,12 @@
 const statsService = require('../services/statsService');
 const activityService = require('../services/activityService');
 const db = require('../services/db');
-const taskService = require('../services/taskService');
+const playbackService = require('../services/playbackService');
 const { probePlatformStatus } = require('../services/platformService');
 
-const VERSION = '4.0.0';
+const VERSION = '5.0.0';
 const PORT = Number(process.env.PORT || 3000);
 const HOST = process.env.HOST || '127.0.0.1';
-
-function getTasks() {
-  const tasks = taskService.getTasks();
-  return (Array.isArray(tasks) ? tasks : []).map((t) => ({
-    id: t.id,
-    platform: t.platform,
-    videoId: t.videoId,
-    status: t.status,
-    requestsSent: t.requestsSent,
-    errors: t.errors,
-    startedAt: t.startedAt,
-    finishedAt: t.finishedAt
-  }));
-}
 
 async function health(req, res) {
   res.json({
@@ -35,22 +21,31 @@ async function health(req, res) {
 }
 
 function statsSync() {
-  const tasks = getTasks();
   const activity = db.get('activity') || [];
+  let playback = null;
+  try {
+    const state = playbackService.getState();
+    const run = state.run;
+    playback = {
+      status: run ? run.status : 'idle',
+      totalSessions: run ? run.sessions.length : 0,
+      runningSessions: run ? run.sessions.filter((s) => s.status === 'running').length : 0,
+      completedSessions: run ? run.sessions.filter((s) => s.status === 'completed').length : 0,
+      failedSessions: run ? run.sessions.filter((s) => s.status === 'failed').length : 0,
+      previewCount: run ? run.sessions.filter((s) => s.kind === 'preview').length : 0
+    };
+  } catch { /* playback state unavailable */ }
+
   return {
     ok: true,
+    version: VERSION,
     uptimeSec: statsService.uptime(),
     uptimeFormatted: statsService.uptimeFormatted(),
-    cpuUsage: 0, // filled async in the async version below
+    cpuUsage: 0,
     memory: statsService.memory(),
-    activeTasks: tasks.filter((t) => t.status === 'running').length,
-    completedTasks: tasks.filter((t) => t.status === 'completed').length,
-    failedTasks: tasks.filter((t) => t.status === 'failed').length,
-    totalTasks: tasks.length,
-    totalOrganicRequests: tasks.reduce((s, t) => s + (t.requestsSent || 0), 0),
+    playback,
     platformStatus: null,
-    lastActivityAt: activity.length ? activity[activity.length - 1].ts : null,
-    statsHistoryCount: (db.get('statsHistory') || []).length
+    lastActivityAt: activity.length ? activity[activity.length - 1].ts : null
   };
 }
 

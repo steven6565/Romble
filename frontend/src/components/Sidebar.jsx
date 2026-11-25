@@ -1,45 +1,68 @@
-// Collapsible navigation sidebar.
-import { useState } from 'react';
+// Collapsible navigation sidebar — closes automatically on mobile.
+import { useEffect, useState } from 'react';
 
 const NAV = [
   { id: 'dashboard', label: 'Dashboard', icon: '📊' },
-  { id: 'settings', label: 'Settings', icon: '⚙️' }
+  { id: 'playback', label: 'Playback Testing', icon: '▶' },
+  { id: 'settings', label: 'Settings', icon: '⚙' }
 ];
 
-export default function Sidebar({ activePage, onPage }) {
+export default function Sidebar({ activePage, onPage, connected }) {
   const [open, setOpen] = useState(false);
-  const [status, setStatus] = useState('checking…');
 
-  const toggle = () => setOpen((o) => !o);
+  useEffect(() => {
+    document.body.classList.toggle('nav-open', open);
+    return () => document.body.classList.remove('nav-open');
+  }, [open]);
+
+  // Close on Escape for keyboard users.
+  useEffect(() => {
+    const onKey = (e) => { if (e.key === 'Escape') setOpen(false); };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, []);
 
   return (
-    <aside className={`sidebar ${open ? 'open' : ''}`} aria-label="Sidebar">
-      <button className="sidebar-toggle" onClick={toggle} aria-expanded={open}>
-        <span>☰</span>
-        {open ? 'Close' : 'Open'}
+    <>
+      <button className="sidebar-toggle" onClick={() => setOpen((o) => !o)} aria-expanded={open} aria-label="Toggle navigation">
+        <span>{open ? '✕' : '☰'}</span>
       </button>
-      <nav className="sidebar-nav">
-        <ul>
-          {NAV.map((item) => (
-            <li key={item.id}>
-              <button
-                className={`nav-item ${activePage === item.id ? 'active' : ''}`}
-                onClick={() => { onPage(item.id); setOpen(false); }}
-              >
-                <span className="nav-icon">{item.icon}</span>
-                <span className="nav-label">{item.label}</span>
-              </button>
-            </li>
-          ))}
-        </ul>
-      </nav>
-      <div className="sidebar-footer">
-        <div className="status-chip">
-          <span className="status-dot"></span>
-          <span>{status}</span>
+
+      {open && <div className="sidebar-scrim" onClick={() => setOpen(false)} />}
+
+      <aside className={`sidebar ${open ? 'open' : ''}`} aria-label="Sidebar">
+        <div className="brand">
+          <span className="brand-mark">R</span>
+          <div className="brand-text">
+            <strong>Romble</strong>
+            <em>v5 dashboard</em>
+          </div>
         </div>
-        <p className="muted">Youtube-Rumble-Termux v4</p>
-      </div>
-    </aside>
+
+        <nav className="sidebar-nav">
+          <ul>
+            {NAV.map((item) => (
+              <li key={item.id}>
+                <button
+                  className={`nav-item ${activePage === item.id ? 'active' : ''}`}
+                  onClick={() => { onPage(item.id); setOpen(false); }}
+                >
+                  <span className="nav-icon">{item.icon}</span>
+                  <span className="nav-label">{item.label}</span>
+                </button>
+              </li>
+            ))}
+          </ul>
+        </nav>
+
+        <div className="sidebar-footer">
+          <div className="status-chip">
+            <span className={`status-dot ${connected ? 'on' : 'off'}`} />
+            <span>{connected ? 'Connected' : 'Reconnecting…'}</span>
+          </div>
+          <p className="muted">Termux · localhost</p>
+        </div>
+      </aside>
+    </>
   );
 }

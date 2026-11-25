@@ -1,11 +1,9 @@
-// Main dashboard: stat cards, charts, video validation, organic task panel, terminal log.
-import { useCallback, useEffect, useMemo, useState } from 'react';
+// Main dashboard: real stats, verified platform status, live activity.
+import { useEffect, useMemo, useState } from 'react';
 import StatCard from '../components/StatsCard.jsx';
 import Chart from '../components/Chart.jsx';
 import TerminalLog from '../components/TerminalLog.jsx';
-import TaskControls from '../components/TaskControls.jsx';
 import api from '../api.js';
-import { useToast } from '../components/Toast.jsx';
 
 function formatBytes(n) {
   if (!n) return '0 B';
@@ -14,69 +12,29 @@ function formatBytes(n) {
   return `${(n / Math.pow(1024, i)).toFixed(i === 0 ? 0 : 1)} ${units[i]}`;
 }
 
-export default function DashboardPage({ stats, activity, connected }) {
-  const toast = useToast();
+export default function DashboardPage({ stats, activity, connected, playback }) {
   const [history, setHistory] = useState([]);
-  const [tasks, setTasks] = useState([]);
-  const [url, setUrl] = useState('');
-  const [validation, setValidation] = useState(null);
-  const [info, setInfo] = useState(null);
-  const [loading, setLoading] = useState(false);
-
-  const refreshTasks = useCallback(async () => {
-    try { setTasks((await api('/tasks')).tasks || []); } catch { /* keep last known */ }
-  }, []);
-
-  const refreshHistory = useCallback(async () => {
-    try { setHistory((await api('/stats/history')).history || []); } catch { /* keep last */ }
-  }, []);
 
   useEffect(() => {
-    refreshTasks();
-    refreshHistory();
-    const i = setInterval(() => { refreshTasks(); refreshHistory(); }, 10000);
-    return () => clearInterval(i);
-  }, [refreshTasks, refreshHistory]);
+    const load = () => api('/stats/history')
+      .then((d) => setHistory(Array.isArray(d.history) ? d.history : []))
+      .catch(() => { /* keep last known history */ });
+    load();
+    const timer = setInterval(load, 15000);
+    return () => clearInterval(timer);
+  }, []);
 
-  const totalRequests = useMemo(() => {
-    const arr = (Array.isArray(stats?.recentActivity) ? stats.recentActivity : []).map((a) => a.requestsSent).filter((v) => typeof v === 'number');
-    return arr.length ? arr[0] : stats?.totalOrganicRequests ?? 0;
-  }, [stats]);
+  // History comes back newest-first; charts want oldest-first.
+  const ordered = useMemo(() => history.slice().reverse(), [history]);
 
-  const requestsSeries = useMemo(() => {
-    const pts = history.map((h) => (typeof h.totalOrganicRequests === 'number' ? h.totalOrganicRequests : 0));
-    return [...pts, stats?.totalOrganicRequests ?? 0];
-  }, [history, stats]);
+  const cpuSeries = useMemo(() => ordered.map((h) => h.cpuUsage ?? 0), [ordered]);
+  const memSeries = useMemo(() => ordered.map((h) => h.memoryPercent ?? 0), [ordered]);
+  const sessionSeries = useMemo(() => ordered.map((h) => h.runningSessions ?? 0), [ordered]);
 
-  const uptimeSeries = useMemo(() => history.map((h) => h.uptimeSec ?? 0).slice(-60), [history]);
-
-  const validate = async () => {
-    const t = url.trim();
-    if (!t) { toast('Enter a video URL.', 'warning'); return; }
-    setLoading(true);
-    try {
-      const d = await api(`/platform/validate?url=${encodeURIComponent(t)}`);
-      if (!d.ok) throw new Error(d.reason || 'Invalid video URL');
-      setValidation(d);
-      toast('Video URL is valid.', 'success');
-    } catch (err) {
-      setValidation(null);
-      toast(err.message || 'Invalid video URL.', 'error');
-    } finally { setLoading(false); }
-  };
-
-  const getInfo = async () => {
-    const t = url.trim();
-    if (!t) { toast('Enter a video URL.', 'warning'); return; }
-    try {
-      const d = await api(`/platform/video?url=${encodeURIComponent(t)}`);
-      setInfo(d);
-      toast('Metadata retrieved from platform.', 'success');
-    } catch (err) {
-      setInfo(null);
-      toast(err.message || 'Metadata could not be retrieved.', 'error');
-    }
-  };
+  const platformStatus = stats?.platformStatus;
+  const platformLabel = !platformStatus
+    ? '—'
+    : [platformStatus.youtube ? 'YouTube' : null, platformStatus.rumble ? 'Rumble' : null].filter(Boolean).join(' · ') || 'Offline';
 
   return (
     <section className="page">
@@ -86,73 +44,66 @@ export default function DashboardPage({ stats, activity, connected }) {
           <h1>Dashboard</h1>
           <span className="status-text">{connected ? 'Connected' : 'Reconnecting…'}</span>
         </div>
-        <p className="muted">Real-time stats, activity and platform tools for the Termux dashboard.</p>
+        <p className="muted">Real device statistics, local playback engine state and verified platform connectivity.</p>
       </div>
 
-      <div className="grid stat-grid">
+      <div className="stat-grid">
         <StatCard title="Uptime" value={stats?.uptimeFormatted || '—'} icon="⏱" color="var(--emerald)" />
-        <StatCard title="CPU usage" value={stats?.cpuUsage ?? 0} unit="%" icon="⚙" color="var(--amber)" subtitle={`Server: ${stats?.platform ? 'reachable' : '—'}`} />
-        <StatCard title="Memory used" value={stats?.memory?.usedBytes ? formatBytes(stats.memory.usedBytes) : '—'} icon="📦" color="var(--violet)" />
-        <StatCard title="Active tasks" value={stats?.activeTasks ?? 0} icon="▶" color="var(--cyan)" />
-        <StatCard title="Completed" value={stats?.completedTasks ?? 0} icon="✓" color="var(--emerald)" />
-        <StatCard title="Failed" value={stats?.failedTasks ?? 0} icon="✕" color="var(--rose)" />
-        <StatCard title="Organic requests" value={totalRequests} icon="↗" color="var(--blue)" />
-        <StatCard title="API status" value={stats?.platformStatus ? (stats.platformStatus.youtube ? 'YouTube' : '—') : '—'} icon="🌐" color="var(--emerald)" />
+        <StatCard title="CPU usage" value={stats?.cpuUsage ?? 0} unit="%" icon="⚙" color="var(--amber)" subtitle="sampled from /proc/stat" />
+        <StatCard title="Memory used" value={stats?.memory?.usedBytes ? formatBytes(stats.memory.usedBytes) : '—'} icon="📦" color="var(--violet)" subtitle={stats?.memory ? `${stats.memory.usedPercent}% of device RAM` : ''} />
+        <StatCard title="Platform APIs" value={platformLabel} icon="🌐" color="var(--cyan)" subtitle="reachability, not views" />
+        <StatCard title="Test sessions" value={stats?.playback?.totalSessions ?? 0} icon="▶" color="var(--blue)" subtitle="local tests only" />
+        <StatCard title="Running now" value={stats?.playback?.runningSessions ?? 0} icon="◉" color="var(--emerald)" subtitle="local, not viewers" />
+        <StatCard title="Completed" value={stats?.playback?.completedSessions ?? 0} icon="✓" color="var(--violet)" subtitle="test sessions" />
+        <StatCard title="Engine state" value={stats?.playback?.status || 'idle'} icon="⌁" color="var(--amber)" />
       </div>
 
-      <div className="grid chart-grid">
+      <div className="notice notice-info">
+        <strong>Local tests are never platform engagement.</strong>
+        <span className="notice-note">Simulated sessions and preview players run on this device only. Verified views, likes and comments appear solely in the analytics panel, read from the platform’s own API.</span>
+      </div>
+
+      <div className="chart-grid">
         <div className="card glass">
-          <h2 className="section-title">Organic requests (last minutes)</h2>
-          <Chart series={requestsSeries} color="var(--blue)" />
+          <span className="chart-caption">CPU usage (%)</span>
+          <Chart series={cpuSeries} color="#fbbf24" label="CPU usage history" />
         </div>
         <div className="card glass">
-          <h2 className="section-title">Uptime (seconds)</h2>
-          <Chart series={uptimeSeries} color="var(--emerald)" />
+          <span className="chart-caption">Memory usage (%)</span>
+          <Chart series={memSeries} color="#a78bfa" label="Memory usage history" />
+        </div>
+        <div className="card glass">
+          <span className="chart-caption">Running test sessions</span>
+          <Chart series={sessionSeries} color="#3b82f6" label="Running test sessions history" />
         </div>
       </div>
 
-      <div className="card glass">
-        <h2 className="section-title">Video validation &amp; metadata</h2>
-        <div className="task-panel">
-          <input
-            className="input"
-            type="url"
-            placeholder="https://www.youtube.com/watch?v=… or https://rumble.com/…"
-            value={url}
-            onChange={(e) => setUrl(e.target.value)}
-            onKeyDown={(e) => e.key === 'Enter' && validate()}
-            aria-label="Video URL"
-          />
-          <button className="btn" disabled={loading} onClick={validate}>{loading ? 'Checking…' : 'Validate'}</button>
-          <button className="btn" onClick={getInfo} disabled={loading}>Metadata</button>
+      {playback?.run && (
+        <div className="card glass">
+          <div className="section-head">
+            <h2 className="section-title">Active playback test</h2>
+            <span className={`tag tag-${playback.run.status}`}>{playback.run.status}</span>
+          </div>
+          <div className="summary-grid">
+            <div className="metric"><span>Preview screens</span><strong>{playback.run.sessions.filter((s) => s.kind === 'preview').length}</strong></div>
+            <div className="metric"><span>Simulated</span><strong>{playback.run.sessions.filter((s) => s.kind === 'background').length}</strong></div>
+            <div className="metric"><span>Duration</span><strong>{playback.run.config?.durationSec}s</strong></div>
+            <div className="metric"><span>Progress</span><strong>{progressOf(playback.run)}%</strong></div>
+          </div>
         </div>
-        {validation && (
-          <div className="validation-result">
-            <div className={`tag ${validation.ok ? 'tag-completed' : 'tag-stopped'}`}>{validation.ok ? 'valid' : validation.reason}</div>
-            {validation.platform && <span><strong>Platform:</strong> {validation.platform}</span>}
-            {validation.videoId && <span><strong>ID:</strong> {validation.videoId}</span>}
-          </div>
-        )}
-        {info && (
-          <div className="validation-result">
-            <div className="video-title">{info.info?.title || 'No title'}</div>
-            <div className="video-meta">
-              <span>Source: {info.source}</span>
-              <span>Duration: {info.durationMs ? (info.durationMs / 60000).toFixed(2) + ' min' : 'unknown'}</span>
-              <span>Views: {info.info?.views?.toLocaleString() ?? '—'}</span>
-              <span>Likes: {info.info?.likes?.toLocaleString() ?? '—'}</span>
-              <span>Latency: {info.latencyMs} ms</span>
-            </div>
-          </div>
-        )}
-      </div>
-
-      <TaskControls tasks={tasks} refresh={refreshTasks} />
+      )}
 
       <div className="card glass">
         <h2 className="section-title">Live terminal activity</h2>
-        <TerminalLog entries={activity} height={280} />
+        <TerminalLog entries={activity} height={260} />
       </div>
     </section>
   );
+}
+
+function progressOf(run) {
+  const sessions = run.sessions || [];
+  if (sessions.length === 0) return 0;
+  const total = sessions.reduce((sum, s) => sum + (s.progress || 0), 0);
+  return Math.round(total / sessions.length);
 }
